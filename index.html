@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwarmScope — PSO step by step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* VOICE: a precise lab instrument for students — calm, exact, every number visible.
+   IDEA: an engineering datasheet for a swarm: one big landscape plot plus exact readout panels.
+   PICTURE: the fitness landscape with particles, trails and the velocity "force diagram".
+   COLOUR and TYPE: cobalt title strip, white panels, pale indigo zones; Space Grotesk + Inter + mono numbers.
+   LAYOUT: controls | landscape + transport | explanation, maths, table, charts. */
+:root{color-scheme:light dark;
+ --bg:light-dark(#f4f6fb,#0a0d18);--panel:light-dark(#ffffff,#121729);--zone:light-dark(#eef2ff,#182040);
+ --ink:light-dark(#0d1220,#e8ecf8);--muted:light-dark(#566079,#9aa4c0);--line:light-dark(#dfe4f2,#263052);
+ --cobalt:#1240e0;--cobalt-ink:light-dark(#1240e0,#8aa2ff);
+ --inert:light-dark(#5b6478,#a3acc2);--cog:#0a9bd6;--soc:#f26b0f;--res:#d6249f;--gold:#f2b300;--good:#0f9d58;--bad:#d93025;--focus:#d6249f;
+ --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;--head:"Space Grotesk",system-ui,sans-serif}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.5 Inter,system-ui,sans-serif;overflow-x:clip}
+button,select,input{font:inherit;color:inherit}
+.strip{background:var(--cobalt);color:#fff;padding:14px max(2vw,14px);display:flex;flex-wrap:wrap;align-items:center;gap:14px 22px}
+.strip h1{font:700 26px/1.05 var(--head);margin:0;letter-spacing:-.01em}
+.strip p{margin:2px 0 0;opacity:.85;font-size:13.5px}
+.modes{display:flex;background:rgba(255,255,255,.14);border-radius:10px;padding:3px;gap:3px}
+.modes button{border:0;background:transparent;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;min-height:40px}
+.modes button.on{background:#fff;color:var(--cobalt);font-weight:600}
+.chk{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500}
+.chk input{width:18px;height:18px;accent-color:var(--gold)}
+.spacer{flex:1}
+main{display:grid;grid-template-columns:280px minmax(0,1fr) 400px;gap:14px;padding:14px max(2vw,14px);align-items:start;max-width:1720px;margin:0 auto}
+@media(max-width:1300px){main{grid-template-columns:270px minmax(0,1fr)}#info{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}#info>.col{display:contents}}
+@media(max-width:860px){main{grid-template-columns:minmax(0,1fr)}#info{grid-template-columns:minmax(0,1fr)}#controls{order:2}#stage{order:1}#info{order:3}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-bottom:14px}
+.card h2{font:600 15px/1.2 var(--head);margin:0 0 9px;display:flex;align-items:center;gap:8px}
+.card h2 small{font:400 12.5px Inter,sans-serif;color:var(--muted)}
+.lab{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font-weight:500}
+.lab output{font-family:var(--mono);font-size:13px;color:var(--cobalt-ink);font-weight:600}
+.hint{font-size:12.5px;color:var(--muted);margin:2px 0 0}
+input[type=range]{width:100%;accent-color:var(--cobalt);height:26px}
+select,input[type=number],input[type=text]{width:100%;background:var(--zone);border:1px solid var(--line);border-radius:7px;padding:8px 9px;font-size:15px;min-height:40px}
+input[type=text]{font-family:var(--mono);font-size:13.5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.presets button{border:1px solid var(--line);background:var(--zone);border-radius:999px;padding:6px 11px;cursor:pointer;font-size:13px;min-height:34px}
+.presets button:hover,.presets button:focus-visible{border-color:var(--cobalt);outline:none}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.locked .lockable{opacity:.45;pointer-events:none}
+.locknote{display:none;background:var(--zone);border-radius:7px;padding:8px 10px;font-size:13px;margin-top:6px}
+.locked .locknote{display:block}
+/* stage */
+.phases{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.phases span{flex:1 1 90px;text-align:center;padding:7px 4px;border-radius:7px;background:var(--zone);color:var(--muted);font-size:12.5px;font-weight:500;border:1px solid transparent;white-space:nowrap}
+.phases span.now{background:var(--cobalt);color:#fff}
+.phases span.next{border-color:var(--cobalt);color:var(--cobalt-ink)}
+.fig{position:relative;aspect-ratio:1/1;width:100%;max-height:calc(100vh - 210px);margin:0 auto;border-radius:8px;overflow:hidden;background:var(--zone)}
+.fig canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.fig.await canvas{cursor:crosshair}
+.readout{position:absolute;right:8px;top:8px;background:rgba(13,18,32,.78);color:#fff;font:12px var(--mono);padding:4px 8px;border-radius:6px;pointer-events:none;display:none}
+.banner{position:absolute;left:50%;top:10px;transform:translateX(-50%);background:var(--gold);color:#1a1300;font-weight:600;padding:7px 14px;border-radius:999px;font-size:13.5px;display:none;box-shadow:0 4px 14px rgba(0,0,0,.2);white-space:nowrap}
+.fig.await .banner{display:block}
+.transport{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px}
+.transport button{min-height:44px;min-width:44px;border:1px solid var(--line);background:var(--panel);border-radius:8px;cursor:pointer;padding:0 12px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.transport button.primary{background:var(--cobalt);color:#fff;border-color:var(--cobalt);min-width:96px;justify-content:center}
+.transport button:disabled{opacity:.4;cursor:default}
+.transport .speed{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:13px;color:var(--muted);min-width:180px}
+.status{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px;font-size:13px;color:var(--muted)}
+.status b{font-family:var(--mono);color:var(--ink);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.legend .dot{width:9px;height:9px;border-radius:50%}
+/* info */
+#explain h3{font:600 17px/1.25 var(--head);margin:0 0 6px}
+#explain p{margin:0 0 7px}
+#explain .tag{display:inline-block;font-size:12px;font-weight:600;color:var(--cobalt-ink);background:var(--zone);border-radius:5px;padding:2px 7px;margin-bottom:6px}
+.log{margin:8px 0 0;padding:8px 0 0;border-top:1px dashed var(--line);font-size:12.5px;color:var(--muted);max-height:96px;overflow:auto;list-style:none}
+.log li{padding:1px 0}
+pre.code{margin:0;font:12.5px/1.65 var(--mono);background:var(--zone);border-radius:7px;padding:8px 0;overflow-x:auto}
+pre.code div{padding:0 10px;border-left:3px solid transparent;white-space:pre}
+pre.code div.hl{background:var(--cobalt);color:#fff;border-left-color:var(--gold)}
+.eq{font:12.5px/1.7 var(--mono);overflow-x:auto;white-space:nowrap}
+.eq .k{color:var(--muted)}
+.c-in{color:var(--inert);font-weight:600}.c-cog{color:var(--cog);font-weight:600}.c-soc{color:var(--soc);font-weight:600}.c-res{color:var(--res);font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;font-size:13px;margin-bottom:8px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-family:var(--mono);font-size:12.5px}
+.scroll{overflow:auto;max-height:280px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:right;font-weight:600;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+td{text-align:right;font-family:var(--mono);padding:3px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+tr{cursor:pointer}
+tr.imp td{background:color-mix(in srgb,var(--good) 16%,transparent)}
+tr.lead td:first-child::after{content:" ★";color:var(--gold)}
+tr.foc td{outline:2px solid var(--focus);outline-offset:-2px}
+.chart{position:relative;height:130px}
+.chart canvas{position:absolute;inset:0;width:100%;height:100%}
+.score{font-size:13px;margin-top:6px}
+/* worked sheet */
+#sheet{display:none;padding:0 max(2vw,14px) 20px;max-width:1720px;margin:0 auto}
+body.worked #sheet{display:block}
+#sheet .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}
+#sheet h2{font:600 22px/1.1 var(--head);margin:6px 0 10px}
+#sheet h3{font:600 15px var(--head);margin:12px 0 4px}
+#sheet .eq{white-space:normal}
+.pass{color:var(--good);font-weight:700}.fail{color:var(--bad);font-weight:700}
+.btn{min-height:44px;border:0;background:var(--cobalt);color:#fff;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
+details summary{cursor:pointer;font:600 15px var(--head)}
+details p{margin:6px 0}
+footer{color:var(--muted);font-size:12.5px;text-align:center;padding:10px 0 24px}
+kbd{font:11.5px var(--mono);background:var(--zone);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+@media(max-width:600px){.strip h1{font-size:22px}.transport .speed{margin-left:0;width:100%}}
+</style>
+</head>
+<body>
+<header class="strip">
+  <div><h1>SwarmScope</h1><p>Particle Swarm Optimization, one step at a time</p></div>
+  <nav class="modes" aria-label="Mode">
+    <button id="mExplore" class="on">Explore</button>
+    <button id="mWorked">Worked example · hand check</button>
+  </nav>
+  <div class="spacer"></div>
+  <label class="chk"><input type="checkbox" id="challenge"> Predict-the-move challenge</label>
+</header>
+
+<main>
+<aside id="controls">
+  <div class="card">
+    <h2>Problem</h2>
+    <select id="problem" class="lockable" aria-label="Problem"></select>
+    <p class="hint" id="pblurb"></p>
+    <div id="customBox" style="display:none">
+      <div class="lab">f(x, y) =</div>
+      <input type="text" id="expr" value="sin(x)*cos(y) + 0.05*(x*x+y*y)" aria-label="Custom function">
+      <div class="two" style="margin-top:6px">
+        <label>min<input type="number" id="cmin" value="-6" step="0.5"></label>
+        <label>max<input type="number" id="cmax" value="6" step="0.5"></label>
+      </div>
+      <p class="hint">Use x, y and Math functions (sin, exp, sqrt, abs, PI…). Press Reset to apply.</p>
+      <p class="hint" id="exprErr" style="color:var(--bad)"></p>
+    </div>
+    <div class="locknote">Locked to the worked-example values so you can check every number against the hand calculation below.</div>
+  </div>
+
+  <div class="card lockable">
+    <h2>Behaviour presets</h2>
+    <div class="presets" id="presets"></div>
+    <p class="hint" id="presetNote">Each preset changes w, c₁, c₂ so you can see one idea in action.</p>
+  </div>
+
+  <div class="card">
+    <h2>Coefficients <small>apply live</small></h2>
+    <div class="lockable">
+    <div class="lab">Inertia w <output id="wO"></output></div>
+    <input type="range" id="w" min="0" max="1.2" step="0.01" value="0.729">
+    <p class="hint" id="wH"></p>
+    <div class="lab">Cognitive c₁ (own memory) <output id="c1O"></output></div>
+    <input type="range" id="c1" min="0" max="3" step="0.01" value="1.494">
+    <p class="hint" id="c1H"></p>
+    <div class="lab">Social c₂ (follow the swarm) <output id="c2O"></output></div>
+    <input type="range" id="c2" min="0" max="3" step="0.01" value="1.494">
+    <p class="hint" id="c2H"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Swarm <small>Reset applies</small></h2>
+    <div class="lockable">
+    <div class="lab">Particles N <output id="NO"></output></div>
+    <input type="range" id="N" min="3" max="60" step="1" value="20">
+    <div class="two" style="margin-top:8px">
+      <label>Seed<input type="number" id="seed" value="7" min="1"></label>
+      <label>Max iterations<input type="number" id="maxIter" value="60" min="2" max="1000"></label>
+    </div>
+    <div class="lab">Neighbourhood</div>
+    <select id="topo"><option value="global">Global best (everyone sees the leader)</option><option value="ring">Ring (only 2 neighbours)</option></select>
+    <div class="lab">Inertia schedule</div>
+    <select id="wSched"><option value="const">Constant w</option><option value="linear">Linear: w → 0.4 over the run</option></select>
+    <div class="lab">Velocity limit v<sub>max</sub> <output id="vmaxO"></output></div>
+    <input type="range" id="vmax" min="0" max="0.5" step="0.01" value="0.2">
+    <p class="hint">Fraction of the search width a particle may move in one step (0 = no limit).</p>
+    <div class="lab">At the walls</div>
+    <select id="bound"><option value="clamp">Stop at the wall (v = 0)</option><option value="reflect">Bounce off the wall</option></select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Show</h2>
+    <label class="chk"><input type="checkbox" id="sTrails" checked> Trails</label>
+    <label class="chk"><input type="checkbox" id="sArrows" checked> Velocity arrows (all)</label>
+    <label class="chk"><input type="checkbox" id="sPb"> Personal bests (all)</label>
+    <label class="chk"><input type="checkbox" id="sContours" checked> Contour lines</label>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>PSO in 60 seconds</summary>
+      <p>Imagine birds searching a valley for the lowest point. Each bird remembers the lowest spot <b>it</b> has seen (personal best) and hears about the lowest spot <b>anyone</b> has seen (global best).</p>
+      <p>Every step, each bird blends three urges into a velocity: keep flying the way it was going (<span class="c-in">inertia</span>), return to its own best (<span class="c-cog">cognitive</span>), and head for the group's best (<span class="c-soc">social</span>). Random weights r₁, r₂ ∈ [0,1) keep the search from being too predictable.</p>
+      <p>Shortcuts: <kbd>Space</kbd> play/pause, <kbd>→</kbd> step, <kbd>Shift</kbd>+<kbd>→</kbd> one iteration, <kbd>←</kbd> back, <kbd>R</kbd> reset. Click a particle to inspect it.</p>
+    </details>
+  </div>
+</aside>
+
+<section id="stage">
+  <div class="card">
+    <div class="phases" id="phases"></div>
+    <div class="fig" id="fig">
+      <canvas id="cv" aria-label="Fitness landscape with particles"></canvas>
+      <div class="readout" id="readout"></div>
+      <div class="banner" id="banner">Click where you think the pink particle will land</div>
+    </div>
+    <div class="transport">
+      <button id="bReset" title="Reset (R)">⟲ Reset</button>
+      <button id="bBack" title="Step back (←)">◀ Back</button>
+      <button id="bPlay" class="primary" title="Play / pause (Space)">▶ Play</button>
+      <button id="bStep" title="One phase (→)">Step ▸</button>
+      <button id="bIter" title="One full iteration (Shift + →)">+1 iteration ▸▸</button>
+      <button id="bSkip" style="display:none">Skip guess</button>
+      <label class="speed">Speed<input type="range" id="speed" min="0.5" max="20" step="0.5" value="4" aria-label="Phases per second"><output id="speedO"></output></label>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:#0d1220;outline:2px solid #fff"></i>particle</span>
+      <span><i class="dot" style="background:var(--focus)"></i>inspected particle</span>
+      <span><i style="background:var(--gold);height:9px;width:9px;clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%)"></i>global best</span>
+      <span><i style="background:var(--inert)"></i>inertia w·v</span>
+      <span><i style="background:var(--cog)"></i>cognitive pull</span>
+      <span><i style="background:var(--soc)"></i>social pull</span>
+      <span><i style="background:var(--res)"></i>new velocity</span>
+      <span>✕ true optimum</span>
+    </div>
+  </div>
+</section>
+
+<aside id="info">
+  <div class="col">
+  <div class="card" id="explainCard">
+    <div id="explain"></div>
+    <div class="score" id="score"></div>
+    <ul class="log" id="log"></ul>
+  </div>
+  <div class="card">
+    <h2>Pseudocode</h2>
+    <pre class="code" id="code"></pre>
+  </div>
+  </div>
+  <div class="col">
+  <div class="card">
+    <h2>Inspector <small id="inspTitle"></small></h2>
+    <div id="insp"></div>
+  </div>
+  <div class="card">
+    <h2>Swarm state <small>click a row to inspect</small></h2>
+    <div class="scroll"><table id="tbl"></table></div>
+  </div>
+  <div class="card">
+    <h2>Convergence <small id="chartNote"></small></h2>
+    <div class="chart"><canvas id="ch1"></canvas></div>
+    <h2 style="margin-top:10px">Swarm spread <small>mean distance to centre</small></h2>
+    <div class="chart"><canvas id="ch2"></canvas></div>
+  </div>
+  </div>
+</aside>
+</main>
+
+<section id="sheet">
+  <h2>Worked example: checked against a hand calculation</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Setup (same as most textbook PSO examples)</h3>
+      <p>Minimise f(x, y) = x² + y² on [−4, 4]². Three particles, all starting at rest (v = 0). w = 0.5, c₁ = c₂ = 1. To make the arithmetic hand-checkable, each particle draws <b>one</b> r₁ and <b>one</b> r₂ per iteration (used for both x and y). The values come from the table on the right.</p>
+      <table>
+        <tr><th>Particle</th><th>x⁰</th><th>r₁, r₂ (iter 1)</th><th>r₁, r₂ (iter 2)</th></tr>
+        <tr><td>P1</td><td>(2, 2)</td><td>0.3, 0.5</td><td>0.4, 0.7</td></tr>
+        <tr><td>P2</td><td>(−1, 3)</td><td>0.5, 0.2</td><td>0.6, 0.3</td></tr>
+        <tr><td>P3</td><td>(1, −1)</td><td>0.8, 0.9</td><td>0.2, 0.5</td></tr>
+      </table>
+      <h3>Iteration 1</h3>
+      <div class="eq">f: P1 = 4+4 = <b>8</b>, P2 = 1+9 = <b>10</b>, P3 = 1+1 = <b>2</b> → pbest = start points, gbest = P3 (1, −1), f = 2.</div>
+      <div class="eq">P1: v = 0.5·0 + 1·0.3·(0) + 1·0.5·((1,−1)−(2,2)) = 0.5·(−1,−3) = <b>(−0.5, −1.5)</b> → x = <b>(1.5, 0.5)</b></div>
+      <div class="eq">P2: v = 0 + 0 + 1·0.2·((1,−1)−(−1,3)) = 0.2·(2,−4) = <b>(0.4, −0.8)</b> → x = <b>(−0.6, 2.2)</b></div>
+      <div class="eq">P3: v = 0 + 0 + 0.9·(0,0) = <b>(0, 0)</b> → stays at (1, −1). <i>The leader at rest doesn't move: a known PSO weakness.</i></div>
+      <h3>Iteration 2</h3>
+      <div class="eq">f: P1 = 2.25+0.25 = <b>2.5</b> (better than 8 → new pbest), P2 = 0.36+4.84 = <b>5.2</b> (new pbest), P3 = <b>2</b>. gbest stays P3, f = 2.</div>
+      <div class="eq">P1: v = 0.5·(−0.5,−1.5) + 0.4·(0) + 0.7·((1,−1)−(1.5,0.5)) = (−0.25,−0.75) + (−0.35,−1.05) = <b>(−0.6, −1.8)</b> → x = <b>(0.9, −1.3)</b></div>
+      <div class="eq">P2: v = 0.5·(0.4,−0.8) + 0 + 0.3·((1,−1)−(−0.6,2.2)) = (0.2,−0.4) + (0.48,−0.96) = <b>(0.68, −1.36)</b> → x = <b>(0.08, 0.84)</b></div>
+      <div class="eq">P3: v = <b>(0, 0)</b> → stays.</div>
+      <h3>Iteration 3 (evaluation)</h3>
+      <div class="eq">f: P1 = 0.81+1.69 = <b>2.5</b> (not better), P2 = 0.0064+0.7056 = <b>0.712</b> (new pbest), P3 = 2. <b>gbest → P2 (0.08, 0.84), f = 0.712.</b></div>
+      <p class="hint">Note: in iteration 1 the cognitive term is always 0, because each particle's personal best is where it stands.</p>
+    </div>
+    <div class="card">
+      <h3>Self-test: engine vs hand values</h3>
+      <p>This runs the same engine that drives the animation, on the setup at left, and compares 30 numbers with the hand values (tolerance 10⁻⁹).</p>
+      <button class="btn" id="runTest">Run self-test</button>
+      <div id="testOut" style="margin-top:10px"></div>
+      <h3>Try it yourself</h3>
+      <p>Press <b>Step</b> on the landscape above. The Inspector shows the same substitution as the hand calculation for the pink particle. Click P1, P2 or P3 to switch between them. After iteration 2 the table runs out and the tool draws seeded random numbers.</p>
+    </div>
+  </div>
+</section>
+<footer>SwarmScope · built for teaching PSO · velocity update after Shi &amp; Eberhart (1998), inertia-weight PSO</footer>
+
+<script>
+{
+// ===== ENGINE START (pure functions, no DOM) =====
+const rnd = r => { r.s = (r.s + 0x6D2B79F5) >>> 0; let t = r.s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const TAU = 2 * Math.PI;
+const PROBLEMS = {
+  sphere: { name: 'Sphere (bowl)', f: (x, y) => x * x + y * y, b: [-5, 5, -5, 5], opt: [[0, 0]], blurb: 'One smooth bowl, minimum 0 at (0, 0). The easiest landscape: good for learning the mechanics.' },
+  booth: { name: 'Booth', f: (x, y) => (x + 2 * y - 7) ** 2 + (2 * x + y - 5) ** 2, b: [-10, 10, -10, 10], opt: [[1, 3]], blurb: 'A tilted, stretched valley; minimum 0 at (1, 3). A classic textbook test function.' },
+  himmelblau: { name: 'Himmelblau (4 minima)', f: (x, y) => (x * x + y - 11) ** 2 + (x + y * y - 7) ** 2, b: [-5, 5, -5, 5], opt: [[3, 2], [-2.805118, 3.131312], [-3.77931, -3.283186], [3.584428, -1.848126]], blurb: 'Four equally good valleys (all f = 0). Which one will the swarm pick? Try the ring neighbourhood to see sub-swarms form.' },
+  rosenbrock: { name: 'Rosenbrock (banana)', f: (x, y) => (1 - x) ** 2 + 100 * (y - x * x) ** 2, b: [-2, 2, -1, 3], opt: [[1, 1]], blurb: 'The curved valley is easy to find, but crawling along it to (1, 1) is slow.' },
+  rastrigin: { name: 'Rastrigin (egg tray)', f: (x, y) => 20 + x * x - 10 * Math.cos(TAU * x) + y * y - 10 * Math.cos(TAU * y), b: [-5.12, 5.12, -5.12, 5.12], opt: [[0, 0]], blurb: 'Dozens of local dips on top of a bowl. A swarm that settles too fast gets stuck in the wrong dimple.' },
+  ackley: { name: 'Ackley (needle)', f: (x, y) => -20 * Math.exp(-0.2 * Math.sqrt(0.5 * (x * x + y * y))) - Math.exp(0.5 * (Math.cos(TAU * x) + Math.cos(TAU * y))) + Math.E + 20, b: [-5, 5, -5, 5], opt: [[0, 0]], blurb: 'A bumpy, almost flat plain with one deep hole in the centre.' },
+  custom: { name: 'Custom f(x, y)…', f: null, b: [-6, 6, -6, 6], opt: [], blurb: 'Type any function of x and y.' },
+  worked: { name: 'Worked example: x² + y²', f: (x, y) => x * x + y * y, b: [-4, 4, -4, 4], opt: [[0, 0]], hidden: true, blurb: 'Three particles, fixed random numbers: every value can be checked by hand.' }
+};
+const WORKED = { N: 3, w: 0.5, c1: 1, c2: 1, init: [[2, 2], [-1, 3], [1, -1]],
+  r: { 1: [[0.3, 0.5], [0.5, 0.2], [0.8, 0.9]], 2: [[0.4, 0.7], [0.6, 0.3], [0.2, 0.5]] } };
+const PHASES = ['evaluate', 'pbest', 'gbest', 'velocity', 'move'];
+const nextPhase = s => (s.phase === 'init' || s.phase === 'move') ? 'evaluate' : PHASES[PHASES.indexOf(s.phase) + 1];
+const neighbours = (i, N) => [(i - 1 + N) % N, (i + 1) % N];
+const spread = s => { const N = s.ps.length; let cx = 0, cy = 0; for (const p of s.ps) { cx += p.x[0]; cy += p.x[1]; } cx /= N; cy /= N; let d = 0; for (const p of s.ps) d += Math.hypot(p.x[0] - cx, p.x[1] - cy); return d / N; };
+const currentW = s => { const c = s.cfg; if (c.wSched === 'linear' && c.maxIter > 1) return c.w - (c.w - 0.4) * Math.min(1, (s.t - 1) / (c.maxIter - 1)); return c.w; };
+
+function createState(cfg, b) {
+  const rng = { s: (cfg.seed >>> 0) || 1 };
+  const [x0, x1, y0, y1] = b, rx = x1 - x0, ry = y1 - y0, ps = [];
+  for (let i = 0; i < cfg.N; i++) {
+    let x, v;
+    if (cfg.worked) { x = [...WORKED.init[i]]; v = [0, 0]; }
+    else { x = [x0 + rnd(rng) * rx, y0 + rnd(rng) * ry]; v = [(rnd(rng) * 2 - 1) * 0.1 * rx, (rnd(rng) * 2 - 1) * 0.1 * ry]; }
+    ps.push({ id: i, x, v, f: null, pb: [...x], pbf: Infinity, lb: null, lbf: Infinity, lbi: -1, prev: [...x], trail: [[...x]], improved: false, comps: null, hitWall: false });
+  }
+  return { cfg: { ...cfg }, b: [...b], rng, t: 0, phase: 'init', ps, g: null, gf: Infinity, gi: -1, hist: [], evals: 0, ev: { phase: 'init' }, forced: null, done: false };
+}
+
+function drawR(s, p) {
+  if (s.cfg.worked && WORKED.r[s.t]) { const rr = WORKED.r[s.t][p.id]; return { r1: [rr[0], rr[0]], r2: [rr[1], rr[1]] }; }
+  return { r1: [rnd(s.rng), rnd(s.rng)], r2: [rnd(s.rng), rnd(s.rng)] };
+}
+
+function stepPhase(s, f) {
+  const ph = nextPhase(s), c = s.cfg, N = s.ps.length, ev = { phase: ph };
+  if (ph === 'evaluate') {
+    s.t++;
+    for (const p of s.ps) { p.f = f(p.x[0], p.x[1]); if (!Number.isFinite(p.f)) p.f = 1e300; }
+    s.evals += N;
+    let bi = 0, wi = 0; s.ps.forEach((p, i) => { if (p.f < s.ps[bi].f) bi = i; if (p.f > s.ps[wi].f) wi = i; });
+    ev.best = bi; ev.worst = wi; ev.mean = s.ps.reduce((a, p) => a + p.f, 0) / N;
+  } else if (ph === 'pbest') {
+    ev.improved = [];
+    for (const p of s.ps) {
+      if (p.f < p.pbf) { ev.improved.push({ id: p.id, old: p.pbf, nw: p.f }); p.pb = [...p.x]; p.pbf = p.f; p.improved = true; }
+      else p.improved = false;
+    }
+  } else if (ph === 'gbest') {
+    let bi = 0; s.ps.forEach((p, i) => { if (p.pbf < s.ps[bi].pbf) bi = i; });
+    ev.old = { g: s.g && [...s.g], gf: s.gf, gi: s.gi };
+    ev.changed = s.ps[bi].pbf < s.gf;
+    if (ev.changed) { s.g = [...s.ps[bi].pb]; s.gf = s.ps[bi].pbf; s.gi = bi; }
+    for (let i = 0; i < N; i++) {
+      let bj = i; for (const j of neighbours(i, N)) if (s.ps[j].pbf < s.ps[bj].pbf) bj = j;
+      const p = s.ps[i]; p.lb = [...s.ps[bj].pb]; p.lbf = s.ps[bj].pbf; p.lbi = bj;
+    }
+    s.hist.push({ t: s.t, best: s.gf, mean: s.ps.reduce((a, p) => a + p.f, 0) / N, spread: spread(s) });
+  } else if (ph === 'velocity') {
+    const w = currentW(s), [x0, x1, y0, y1] = s.b, vm = [c.vmax * (x1 - x0), c.vmax * (y1 - y0)];
+    let clamped = 0;
+    for (const p of s.ps) {
+      const R = (s.forced && s.forced.id === p.id && s.forced.t === s.t) ? s.forced : drawR(s, p);
+      const tgt = (c.topo === 'ring' && p.lb) ? p.lb : s.g;
+      const k = { t: s.t, w, c1: c.c1, c2: c.c2, r1: R.r1, r2: R.r2, x: [...p.x], vOld: [...p.v], pb: [...p.pb], tgt: [...tgt], tgtId: c.topo === 'ring' ? p.lbi : s.gi, inert: [0, 0], cog: [0, 0], soc: [0, 0], raw: [0, 0], clamped: false };
+      const nv = [0, 0];
+      for (let d = 0; d < 2; d++) {
+        k.inert[d] = w * p.v[d];
+        k.cog[d] = c.c1 * R.r1[d] * (p.pb[d] - p.x[d]);
+        k.soc[d] = c.c2 * R.r2[d] * (tgt[d] - p.x[d]);
+        let v = k.inert[d] + k.cog[d] + k.soc[d]; k.raw[d] = v;
+        if (c.vmax > 0 && Math.abs(v) > vm[d]) { v = Math.sign(v) * vm[d]; k.clamped = true; }
+        nv[d] = v;
+      }
+      if (k.clamped) clamped++;
+      p.comps = k; p.v = nv;
+    }
+    s.forced = null; ev.w = w; ev.clamped = clamped;
+  } else if (ph === 'move') {
+    let walls = 0; ev.spreadBefore = spread(s);
+    for (const p of s.ps) {
+      p.prev = [...p.x]; p.hitWall = false;
+      for (let d = 0; d < 2; d++) {
+        const lo = s.b[d * 2], hi = s.b[d * 2 + 1];
+        let x = p.x[d] + p.v[d];
+        if (x < lo || x > hi) {
+          p.hitWall = true;
+          if (c.bound === 'reflect') { x = x < lo ? lo + (lo - x) : hi - (x - hi); p.v[d] = -p.v[d]; x = Math.min(hi, Math.max(lo, x)); }
+          else { x = Math.min(hi, Math.max(lo, x)); p.v[d] = 0; }
+        }
+        p.x[d] = x;
+      }
+      if (p.hitWall) walls++;
+      p.trail.push([...p.x]); if (p.trail.length > 16) p.trail.shift();
+    }
+    ev.walls = walls; ev.spreadAfter = spread(s);
+    if (s.t >= c.maxIter) s.done = true;
+  }
+  s.phase = ph; s.ev = ev; return ev;
+}
+
+const workedCfg = () => ({ N: 3, w: WORKED.w, c1: WORKED.c1, c2: WORKED.c2, wSched: 'const', vmax: 0, topo: 'global', bound: 'clamp', maxIter: 30, seed: 7, worked: true });
+// Hand-calculated values (see the worked sheet / README)
+const EXPECT = [
+  { t: 1, ph: 'evaluate', what: 'f', val: [8, 10, 2] },
+  { t: 1, ph: 'gbest', what: 'g', val: { gi: 2, gf: 2, g: [1, -1] } },
+  { t: 1, ph: 'velocity', what: 'v', val: [[-0.5, -1.5], [0.4, -0.8], [0, 0]] },
+  { t: 1, ph: 'move', what: 'x', val: [[1.5, 0.5], [-0.6, 2.2], [1, -1]] },
+  { t: 2, ph: 'evaluate', what: 'f', val: [2.5, 5.2, 2] },
+  { t: 2, ph: 'pbest', what: 'pbf', val: [2.5, 5.2, 2] },
+  { t: 2, ph: 'gbest', what: 'g', val: { gi: 2, gf: 2, g: [1, -1] } },
+  { t: 2, ph: 'velocity', what: 'v', val: [[-0.6, -1.8], [0.68, -1.36], [0, 0]] },
+  { t: 2, ph: 'move', what: 'x', val: [[0.9, -1.3], [0.08, 0.84], [1, -1]] },
+  { t: 3, ph: 'evaluate', what: 'f', val: [2.5, 0.712, 2] },
+  { t: 3, ph: 'gbest', what: 'g', val: { gi: 1, gf: 0.712, g: [0.08, 0.84] } }
+];
+function selfTest() {
+  const s = createState(workedCfg(), PROBLEMS.worked.b), f = PROBLEMS.worked.f, rows = [], tol = 1e-9;
+  const near = (a, b) => Math.abs(a - b) <= tol;
+  while (!(s.t === 3 && s.phase === 'gbest')) {
+    stepPhase(s, f);
+    for (const e of EXPECT.filter(e => e.t === s.t && e.ph === s.phase)) {
+      if (e.what === 'g') {
+        rows.push({ label: `iter ${e.t} · gbest index`, hand: 'P' + (e.val.gi + 1), got: 'P' + (s.gi + 1), ok: s.gi === e.val.gi });
+        rows.push({ label: `iter ${e.t} · gbest f`, hand: e.val.gf, got: s.gf, ok: near(s.gf, e.val.gf) });
+      } else {
+        s.ps.forEach((p, i) => {
+          const got = e.what === 'f' ? p.f : e.what === 'pbf' ? p.pbf : e.what === 'v' ? p.v : p.x, hand = e.val[i];
+          const ok = Array.isArray(hand) ? near(got[0], hand[0]) && near(got[1], hand[1]) : near(got, hand);
+          rows.push({ label: `iter ${e.t} · P${i + 1} ${e.what === 'pbf' ? 'pbest f' : e.what}`, hand, got: Array.isArray(got) ? [...got] : got, ok });
+        });
+      }
+    }
+  }
+  return rows;
+}
+// ===== ENGINE END =====
+if (typeof window === 'undefined') { module.exports = { PROBLEMS, createState, stepPhase, selfTest, nextPhase }; }
+else {
+// ===== UI =====
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d'), fig = $('fig');
+const ui = { mode: 'explore', playing: false, focus: 0, awaiting: false, predictedT: -1, prediction: null, stats: { n: 0, sum: 0 }, snaps: [], anim: null, hover: null, log: [], dirty: true, acc: 0, last: 0 };
+let S, F, B, OPT, bg = null, geo = null;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const PRESETS = [
+  { n: 'Balanced (Clerc)', w: 0.729, c1: 1.494, c2: 1.494, note: 'The "constriction" values from Clerc & Kennedy (2002): a reliable default that balances exploring and settling.' },
+  { n: 'Explorer', w: 0.9, c1: 2.0, c2: 1.0, note: 'High inertia and strong self-memory: particles roam widely and settle slowly. Good for many local minima.' },
+  { n: 'Exploiter', w: 0.4, c1: 1.0, c2: 2.0, note: 'Low inertia and a strong pull to the leader: very fast convergence, but it can lock onto the wrong valley (try Rastrigin).' },
+  { n: 'Loners (c₂ = 0)', w: 0.7, c1: 1.5, c2: 0, note: 'No social pull: every particle searches alone around its own best. The swarm never really converges.' },
+  { n: 'Herd (c₁ = 0)', w: 0.7, c1: 0, c2: 1.5, note: 'No memory: everyone just chases the leader. Diversity collapses quickly.' },
+  { n: 'Explosion (w = 1.1)', w: 1.1, c1: 1.5, c2: 1.5, vmax: 0, note: 'w > 1 with no velocity limit: speeds grow every step and the swarm flies apart. This is why w < 1 is used.' }
+];
+const fmt = v => { if (v === null || v === undefined) return '–'; if (!Number.isFinite(v)) return '∞'; const a = Math.abs(v); if (a !== 0 && (a >= 1e5 || a < 1e-3)) return v.toExponential(2).replace('-', '−'); return v.toFixed(3).replace('-', '−'); };
+const pt = a => `(${fmt(a[0])}, ${fmt(a[1])})`;
+const probe = document.createElement('i'); probe.style.display = 'none'; document.body.appendChild(probe);
+const cssCache = {}; const css = n => cssCache[n] || (probe.style.color = `var(${n})`, cssCache[n] = getComputedStyle(probe).color);
+const clearCss = () => { for (const k in cssCache) delete cssCache[k]; };
+
+// --- controls setup
+for (const [k, p] of Object.entries(PROBLEMS)) if (!p.hidden) $('problem').insertAdjacentHTML('beforeend', `<option value="${k}">${p.name}</option>`);
+$('presets').innerHTML = PRESETS.map((p, i) => `<button data-i="${i}">${p.n}</button>`).join('');
+$('phases').innerHTML = ['Start', 'Evaluate', 'Personal best', 'Global best', 'Velocity', 'Move'].map((n, i) => `<span data-p="${['init', ...PHASES][i]}">${n}</span>`).join('');
+const CODE = [['init', 'init: random x, small random v'], ['', 'repeat until max iterations:'], ['evaluate', '  for each particle: f ← fitness(x)'], ['pbest', '    if f < f(pbest): pbest ← x'], ['gbest', '  gbest ← lowest pbest (swarm or ring)'], ['', '  for each particle and dimension:'], ['velocity', '    v ← w·v + c₁r₁(pbest−x) + c₂r₂(gbest−x)'], ['move', '    x ← x + v  (keep inside bounds)']];
+$('code').innerHTML = CODE.map(([p, t]) => `<div data-p="${p}">${t.replace(/[<]/g, '&lt;')}</div>`).join('');
+
+const hintW = w => w > 1 ? 'Above 1: velocities grow every step, so the swarm explodes.' : w > 0.8 ? 'High: particles keep flying, which means more exploring.' : w < 0.45 ? 'Low: particles brake hard and settle quickly.' : 'Medium: a balance of exploring and settling.';
+const hintC1 = c => c === 0 ? 'Off: particles forget where they have been.' : c > 2 ? 'Strong: each particle mostly revisits its own best.' : 'How strongly a particle returns to its own best spot.';
+const hintC2 = c => c === 0 ? 'Off: no teamwork; the swarm never converges.' : c > 2 ? 'Strong: everyone rushes the leader, so the swarm can converge too early.' : 'How strongly a particle is pulled toward the swarm\'s best.';
+function syncOutputs() {
+  const w = +$('w').value, c1 = +$('c1').value, c2 = +$('c2').value;
+  $('wO').textContent = w.toFixed(2); $('c1O').textContent = c1.toFixed(2); $('c2O').textContent = c2.toFixed(2);
+  $('wH').textContent = hintW(w); $('c1H').textContent = hintC1(c1); $('c2H').textContent = hintC2(c2);
+  $('NO').textContent = $('N').value; $('vmaxO').textContent = +$('vmax').value === 0 ? 'off' : (+$('vmax').value * 100).toFixed(0) + '%';
+  $('speedO').textContent = $('speed').value + '/s';
+  const pk = $('problem').value; $('pblurb').textContent = PROBLEMS[pk].blurb; $('customBox').style.display = pk === 'custom' ? 'block' : 'none';
+}
+function readCfg() {
+  return { N: +$('N').value, w: +$('w').value, c1: +$('c1').value, c2: +$('c2').value, wSched: $('wSched').value, vmax: +$('vmax').value, topo: $('topo').value, bound: $('bound').value, maxIter: Math.max(2, +$('maxIter').value || 60), seed: Math.max(1, +$('seed').value || 1), worked: false };
+}
+function compileCustom() {
+  const src = $('expr').value; $('exprErr').textContent = '';
+  if (/[;{}=`]|\b(window|document|fetch|import|eval|Function|constructor|prototype|this)\b/.test(src.replace(/[<>!]=|==/g, ''))) { $('exprErr').textContent = 'Only maths expressions are allowed.'; return null; }
+  try {
+    const names = Object.getOwnPropertyNames(Math);
+    const fn = new Function('x', 'y', `const {${names.join(',')}} = Math; return (${src.replace(/\^/g, '**')});`);
+    const lo = +$('cmin').value, hi = +$('cmax').value;
+    if (!(hi > lo)) { $('exprErr').textContent = 'max must be greater than min.'; return null; }
+    const v = fn((lo + hi) / 2, (lo + hi) / 2); if (typeof v !== 'number' || Number.isNaN(v)) throw new Error('not a number');
+    return { f: fn, b: [lo, hi, lo, hi] };
+  } catch (e) { $('exprErr').textContent = 'Could not read that: ' + e.message; return null; }
+}
+
+// --- reset / state
+function reset() {
+  pause();
+  let cfg, prob;
+  if (ui.mode === 'worked') { cfg = workedCfg(); prob = PROBLEMS.worked; F = prob.f; B = prob.b; OPT = prob.opt; }
+  else {
+    cfg = readCfg(); const pk = $('problem').value; prob = PROBLEMS[pk];
+    if (pk === 'custom') { const c = compileCustom(); if (!c) { if (!F) { F = PROBLEMS.sphere.f; B = PROBLEMS.sphere.b; OPT = []; } } else { F = c.f; B = c.b; OPT = []; } }
+    else { F = prob.f; B = prob.b; OPT = prob.opt; }
+  }
+  S = createState(cfg, B);
+  ui.snaps = []; ui.focus = Math.min(ui.focus, cfg.N - 1); ui.awaiting = false; ui.predictedT = -1; ui.prediction = null; ui.anim = null; ui.log = [];
+  buildBackground(); pushLog(); renderAll();
+}
+function liveCfg() { if (!S || ui.mode === 'worked') return; Object.assign(S.cfg, { w: +$('w').value, c1: +$('c1').value, c2: +$('c2').value, wSched: $('wSched').value, vmax: +$('vmax').value, topo: $('topo').value, bound: $('bound').value, maxIter: Math.max(2, +$('maxIter').value || 60) }); S.done = S.t >= S.cfg.maxIter && S.phase === 'move'; renderAll(); }
+
+function doStep() {
+  if (S.done) { pause(); renderAll(); return false; }
+  if ($('challenge').checked && nextPhase(S) === 'velocity' && !ui.awaiting && ui.predictedT !== S.t) { startPrediction(); return false; }
+  if (ui.awaiting) return false;
+  ui.snaps.push(structuredClone(S)); if (ui.snaps.length > 3000) ui.snaps.shift();
+  stepPhase(S, F);
+  if (S.phase === 'move') ui.anim = reduceMotion ? null : { t0: performance.now(), dur: Math.min(450, 900 / +$('speed').value) };
+  if (S.phase === 'move' && ui.prediction && ui.prediction.t === S.t && !ui.prediction.scored) scorePrediction();
+  pushLog(); renderAll();
+  if (S.done) pause();
+  return true;
+}
+function stepIter() { let n = 0; do { if (!doStep()) break; n++; } while (S.phase !== 'move' && n < 6); }
+function back() {
+  if (ui.awaiting) { ui.awaiting = false; ui.predictedT = S.t; }
+  const s = ui.snaps.pop(); if (!s) return; S = s; ui.anim = null; ui.log.shift(); renderAll();
+}
+function play() { if (S.done) return; ui.playing = true; ui.last = performance.now(); ui.acc = 0; $('bPlay').textContent = '⏸ Pause'; }
+function pause() { ui.playing = false; $('bPlay').textContent = '▶ Play'; }
+
+// --- prediction challenge
+function startPrediction() {
+  pause();
+  ui.snaps.push(structuredClone(S));
+  const p = S.ps[ui.focus], R = drawR(S, p);
+  S.forced = { id: p.id, t: S.t, r1: R.r1, r2: R.r2 };
+  ui.awaiting = true; ui.prediction = null; renderAll();
+}
+function submitPrediction(wx, wy) {
+  ui.prediction = { t: S.t, id: ui.focus, pos: [wx, wy], scored: false };
+  ui.awaiting = false; ui.predictedT = S.t;
+  doStep(); doStep();
+}
+function scorePrediction() {
+  const pr = ui.prediction, p = S.ps[pr.id], diag = Math.hypot(S.b[1] - S.b[0], S.b[3] - S.b[2]);
+  const err = Math.hypot(pr.pos[0] - p.x[0], pr.pos[1] - p.x[1]) / diag * 100;
+  pr.err = err; pr.scored = true; ui.stats.n++; ui.stats.sum += err;
+  pr.grade = err < 3 ? 'Bullseye!' : err < 8 ? 'Close.' : err < 15 ? 'In the area.' : 'Way off.';
+}
+
+// --- geometry
+function layout() {
+  const r = fig.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const m = { l: 40, r: 10, t: 10, b: 28 };
+  geo = { dpr, W: r.width, H: r.height, m, pw: r.width - m.l - m.r, ph: r.height - m.t - m.b };
+}
+const sx = x => geo.m.l + (x - B[0]) / (B[1] - B[0]) * geo.pw;
+const sy = y => geo.m.t + (B[3] - y) / (B[3] - B[2]) * geo.ph;
+const wx = px => B[0] + (px - geo.m.l) / geo.pw * (B[1] - B[0]);
+const wy = py => B[3] - (py - geo.m.t) / geo.ph * (B[3] - B[2]);
+const CMAP = [[0, [255, 255, 255]], [0.25, [228, 235, 255]], [0.55, [178, 194, 250]], [0.8, [118, 142, 236]], [1, [70, 94, 206]]];
+function cmap(t) { for (let i = 1; i < CMAP.length; i++) if (t <= CMAP[i][0]) { const [a, ca] = CMAP[i - 1], [b, cb] = CMAP[i], k = (t - a) / (b - a); return ca.map((v, j) => Math.round(v + (cb[j] - v) * k)); } return CMAP[CMAP.length - 1][1]; }
+function buildBackground() {
+  layout();
+  const G = 150, vals = new Float64Array((G + 1) * (G + 1));
+  let lo = Infinity, hi = -Infinity;
+  for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) { let v = F(B[0] + i / G * (B[1] - B[0]), B[3] - j / G * (B[3] - B[2])); if (!Number.isFinite(v)) v = NaN; vals[j * (G + 1) + i] = v; if (v < lo) lo = v; if (v > hi) hi = v; }
+  const span = Math.log1p(Math.max(1e-12, hi - lo)), tr = v => Number.isNaN(v) ? 1 : Math.log1p(Math.max(0, v - lo)) / span;
+  const img = new ImageData(G + 1, G + 1);
+  for (let k = 0; k < vals.length; k++) { const c = cmap(tr(vals[k])); img.data.set([c[0], c[1], c[2], 255], k * 4); }
+  const tile = document.createElement('canvas'); tile.width = tile.height = G + 1; tile.getContext('2d').putImageData(img, 0, 0);
+  bg = document.createElement('canvas'); bg.width = cv.width; bg.height = cv.height;
+  const g = bg.getContext('2d'), d = geo.dpr; g.scale(d, d);
+  g.imageSmoothingEnabled = true; g.drawImage(tile, geo.m.l, geo.m.t, geo.pw, geo.ph);
+  if ($('sContours').checked) {
+    g.lineWidth = 0.8; const L = 16, cw = geo.pw / G, chh = geo.ph / G;
+    for (let l = 1; l <= L; l++) {
+      const th = l / (L + 1); g.strokeStyle = th < 0.5 ? 'rgba(18,64,224,.35)' : 'rgba(255,255,255,.35)'; g.beginPath();
+      for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
+        const a = tr(vals[j * (G + 1) + i]), b = tr(vals[j * (G + 1) + i + 1]), c = tr(vals[(j + 1) * (G + 1) + i + 1]), e = tr(vals[(j + 1) * (G + 1) + i]);
+        const X = geo.m.l + i * cw, Y = geo.m.t + j * chh, P = [];
+        if ((a < th) !== (b < th)) P.push([X + (th - a) / (b - a) * cw, Y]);
+        if ((b < th) !== (c < th)) P.push([X + cw, Y + (th - b) / (c - b) * chh]);
+        if ((c < th) !== (e < th)) P.push([X + (th - e) / (c - e) * cw, Y + chh]);
+        if ((e < th) !== (a < th)) P.push([X, Y + (th - a) / (e - a) * chh]);
+        for (let q = 0; q + 1 < P.length; q += 2) { g.moveTo(P[q][0], P[q][1]); g.lineTo(P[q + 1][0], P[q + 1][1]); }
+      }
+      g.stroke();
+    }
+  }
+  // axes
+  g.fillStyle = css('--muted'); g.font = '11px "JetBrains Mono", monospace'; g.strokeStyle = css('--line'); g.lineWidth = 1;
+  const ticks = (a, b) => { const st = niceStep((b - a) / 6), out = []; for (let v = Math.ceil(a / st) * st; v <= b + 1e-9; v += st) out.push(+v.toFixed(6)); return out; };
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (const v of ticks(B[0], B[1])) { const X = sx(v); g.fillText(trimNum(v), X, geo.m.t + geo.ph + 6); g.beginPath(); g.moveTo(X, geo.m.t + geo.ph); g.lineTo(X, geo.m.t + geo.ph + 4); g.stroke(); }
+  g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const v of ticks(B[2], B[3])) { const Y = sy(v); g.fillText(trimNum(v), geo.m.l - 7, Y); g.beginPath(); g.moveTo(geo.m.l - 4, Y); g.lineTo(geo.m.l, Y); g.stroke(); }
+  g.textAlign = 'left'; g.fillText('x →', geo.m.l + geo.pw - 26, geo.m.t + geo.ph + 14);
+  g.save(); g.translate(10, geo.m.t + 14); g.fillText('y ↑', 0, 0); g.restore();
+  // optimum markers
+  g.strokeStyle = '#0d1220'; g.lineWidth = 2;
+  for (const o of OPT) { const X = sx(o[0]), Y = sy(o[1]); g.beginPath(); g.moveTo(X - 6, Y - 6); g.lineTo(X + 6, Y + 6); g.moveTo(X + 6, Y - 6); g.lineTo(X - 6, Y + 6); g.stroke(); }
+  ui.dirty = true;
+}
+const niceStep = r => { const p = 10 ** Math.floor(Math.log10(r)), f = r / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; };
+const trimNum = v => Math.abs(v) < 1e-9 ? '0' : String(+v.toFixed(2)).replace('-', '−');
+
+// --- drawing
+function arrow(x1, y1, x2, y2, col, lw, dash) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy); if (L < 1) return;
+  const h = Math.min(10, 4 + lw * 2, L * 0.55), a = Math.atan2(dy, dx), bx = x2 - h * 0.8 * Math.cos(a), by = y2 - h * 0.8 * Math.sin(a);
+  ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - h * Math.cos(a - 0.42), y2 - h * Math.sin(a - 0.42)); ctx.lineTo(x2 - h * Math.cos(a + 0.42), y2 - h * Math.sin(a + 0.42)); ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function star(x, y, r, fill) {
+  ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); } ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#0d1220'; ctx.stroke();
+}
+function label(text, x, y, col) {
+  ctx.font = '600 11px Inter, sans-serif'; const w = ctx.measureText(text).width + 8;
+  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(x, y - 8, w, 16); ctx.fillStyle = col; ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillText(text, x + 4, y);
+}
+function posOf(p, k) { return (k < 1 && S.phase === 'move') ? [p.prev[0] + (p.x[0] - p.prev[0]) * k, p.prev[1] + (p.x[1] - p.prev[1]) * k] : p.x; }
+function draw(now) {
+  const d = geo.dpr; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); if (bg) ctx.drawImage(bg, 0, 0);
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.save(); ctx.beginPath(); ctx.rect(geo.m.l, geo.m.t, geo.pw, geo.ph); ctx.clip();
+  let k = 1; if (ui.anim) { k = Math.min(1, (now - ui.anim.t0) / ui.anim.dur); k = 1 - (1 - k) ** 3; if (k >= 1) ui.anim = null; }
+  const ph = S.phase, few = S.ps.length <= 12, fp = S.ps[ui.focus], ring = S.cfg.topo === 'ring';
+  // trails
+  if ($('sTrails').checked) for (const p of S.ps) {
+    const tr = p.trail.slice(0, k < 1 && ph === 'move' ? -1 : undefined); if (k < 1 && ph === 'move') tr.push(posOf(p, k));
+    for (let i = 1; i < tr.length; i++) { ctx.strokeStyle = `rgba(13,18,32,${0.08 + 0.4 * i / tr.length})`; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(sx(tr[i - 1][0]), sy(tr[i - 1][1])); ctx.lineTo(sx(tr[i][0]), sy(tr[i][1])); ctx.stroke(); }
+  }
+  // personal bests
+  const showPb = $('sPb').checked || ph === 'pbest';
+  for (const p of S.ps) if ((showPb || p === fp) && Number.isFinite(p.pbf)) {
+    const X = sx(p.pb[0]), Y = sy(p.pb[1]); ctx.strokeStyle = p === fp ? css('--cog') : 'rgba(10,155,214,.85)'; ctx.lineWidth = 1.6; ctx.strokeRect(X - 4, Y - 4, 8, 8);
+    if (p === fp || (ph === 'pbest' && p.improved)) { ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X, Y); const q = posOf(p, k); ctx.lineTo(sx(q[0]), sy(q[1])); ctx.stroke(); ctx.setLineDash([]); }
+  }
+  // ring links
+  if (ring && fp && (ph === 'gbest' || ph === 'velocity')) for (const j of [(fp.id - 1 + S.ps.length) % S.ps.length, (fp.id + 1) % S.ps.length]) { ctx.strokeStyle = 'rgba(242,107,15,.6)'; ctx.setLineDash([2, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(sx(fp.x[0]), sy(fp.x[1])); ctx.lineTo(sx(S.ps[j].x[0]), sy(S.ps[j].x[1])); ctx.stroke(); ctx.setLineDash([]); }
+  // gbest move
+  if (ph === 'gbest' && S.ev.changed && S.ev.old.g) arrow(sx(S.ev.old.g[0]), sy(S.ev.old.g[1]), sx(S.g[0]), sy(S.g[1]), css('--gold'), 2.5, [5, 4]);
+  // velocity arrows (all)
+  if ($('sArrows').checked && (ph === 'velocity' || ph === 'move') ) for (const p of S.ps) if (p !== fp) {
+    const o = ph === 'velocity' ? p.x : p.prev; arrow(sx(o[0]), sy(o[1]), sx(o[0] + p.v[0]), sy(o[1] + p.v[1]), 'rgba(214,36,159,.65)', 1.4);
+  }
+  // particles
+  for (const p of S.ps) {
+    const q = posOf(p, k), X = sx(q[0]), Y = sy(q[1]);
+    if (ph === 'pbest' && p.improved) { ctx.strokeStyle = css('--good'); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X, Y, 10, 0, 7); ctx.stroke(); }
+    if (ph === 'move' && p.hitWall) { ctx.strokeStyle = css('--bad'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X, Y, 9, 0, 7); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(X, Y, p === fp ? 6.5 : 5, 0, 7); ctx.fillStyle = p === fp ? css('--focus') : '#0d1220'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+    if (few) { ctx.font = '600 10.5px Inter, sans-serif'; ctx.fillStyle = '#0d1220'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText('P' + (p.id + 1) + (ph === 'evaluate' ? ` f=${fmt(p.f)}` : ''), X + 7, Y - 4); }
+  }
+  // gbest star
+  if (S.g) star(sx(S.g[0]), sy(S.g[1]), ph === 'gbest' ? 11 : 9, css('--gold'));
+  // focused particle: force diagram
+  if (fp) {
+    const kk = fp.comps, cur = kk && kk.t === S.t && (ph === 'velocity' || ph === 'move');
+    if (ui.awaiting) {
+      const w = currentW(S), ix = [fp.x[0] + w * fp.v[0], fp.x[1] + w * fp.v[1]], tgt = (ring && fp.lb) ? fp.lb : S.g;
+      arrow(sx(fp.x[0]), sy(fp.x[1]), sx(ix[0]), sy(ix[1]), css('--inert'), 2.5);
+      label('inertia alone', sx(ix[0]) + 6, sy(ix[1]), css('--inert'));
+      label('own best', sx(fp.pb[0]) + 7, sy(fp.pb[1]) + 12, css('--cog'));
+      if (tgt) label(ring ? 'neighbourhood best' : 'swarm best', sx(tgt[0]) + 10, sy(tgt[1]) - 12, css('--soc'));
+    } else if (cur) {
+      const o = kk.x, a = [o[0] + kk.inert[0], o[1] + kk.inert[1]], b = [a[0] + kk.cog[0], a[1] + kk.cog[1]], c = [b[0] + kk.soc[0], b[1] + kk.soc[1]];
+      arrow(sx(o[0]), sy(o[1]), sx(a[0]), sy(a[1]), css('--inert'), 3);
+      arrow(sx(a[0]), sy(a[1]), sx(b[0]), sy(b[1]), css('--cog'), 3);
+      arrow(sx(b[0]), sy(b[1]), sx(c[0]), sy(c[1]), css('--soc'), 3);
+      arrow(sx(o[0]), sy(o[1]), sx(o[0] + fp.v[0]), sy(o[1] + fp.v[1]), css('--res'), 3.2, [6, 4]);
+      if (kk.clamped) label('limited by vmax', sx(o[0] + fp.v[0]) + 8, sy(o[1] + fp.v[1]), css('--res'));
+    }
+  }
+  // prediction marker
+  const pr = ui.prediction;
+  if (pr && pr.t === S.t && (ph === 'move' || ph === 'velocity')) {
+    const X = sx(pr.pos[0]), Y = sy(pr.pos[1]); ctx.strokeStyle = css('--focus'); ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(X - 7, Y - 7); ctx.lineTo(X + 7, Y + 7); ctx.moveTo(X + 7, Y - 7); ctx.lineTo(X - 7, Y + 7); ctx.stroke();
+    label('your guess', X + 9, Y, css('--focus'));
+    if (ph === 'move' && k >= 1) { const p = S.ps[pr.id]; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(sx(p.x[0]), sy(p.x[1])); ctx.stroke(); ctx.setLineDash([]); }
+  }
+  if (ui.hover && ui.awaiting) { ctx.strokeStyle = css('--focus'); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(ui.hover[0], ui.hover[1], 8, 0, 7); ctx.stroke(); }
+  ctx.restore();
+  ctx.strokeStyle = css('--line'); ctx.lineWidth = 1; ctx.strokeRect(geo.m.l + .5, geo.m.t + .5, geo.pw - 1, geo.ph - 1);
+}
+
+// --- explanations
+function explain() {
+  const ph = S.phase, N = S.ps.length, ev = S.ev, fp = S.ps[ui.focus], P = i => 'P' + (i + 1), ring = S.cfg.topo === 'ring';
+  if (ui.awaiting) {
+    const R = S.forced; return { tag: 'Your turn', h: `Where will ${P(fp.id)} land?`, p: [`The dice are rolled for ${P(fp.id)}: r₁ = (${fmt(R.r1[0])}, ${fmt(R.r1[1])}), r₂ = (${fmt(R.r2[0])}, ${fmt(R.r2[1])}). With w = ${fmt(currentW(S))}, c₁ = ${fmt(S.cfg.c1)}, c₂ = ${fmt(S.cfg.c2)}.`, `The grey arrow shows where inertia alone would carry it. Add c₁·r₁ of the way back to its <span class="c-cog">own best</span> and c₂·r₂ of the way toward the <span class="c-soc">${ring ? 'neighbourhood' : 'swarm'} best</span>. Then click your guess on the map.`] };
+  }
+  switch (ph) {
+    case 'init': return { tag: 'Start', h: `${N} particles scattered at random`, p: [S.cfg.worked ? 'The three particles start at the textbook positions, at rest. Nothing has been measured yet.' : `Each particle gets a random position inside the search box and a small random velocity. Nobody has measured anything yet, so there is no personal or global best.`, 'Press <b>Step</b> to start the first iteration.'] };
+    case 'evaluate': return { tag: `Iteration ${S.t} · evaluate`, h: 'Every particle measures its fitness', p: [`Each particle computes f(x, y) where it stands. Lower is better here. This costs ${N} function evaluations (${S.evals} so far).`, `Best right now: <b>${P(ev.best)}</b> with f = ${fmt(S.ps[ev.best].f)}. Worst: ${P(ev.worst)} with f = ${fmt(S.ps[ev.worst].f)}. Average: ${fmt(ev.mean)}.`] };
+    case 'pbest': {
+      const im = ev.improved, n = im.length;
+      if (S.t === 1) return { tag: `Iteration ${S.t} · personal best`, h: 'First look, so every spot is a personal best', p: ['Each particle stores where it is now as its personal best (blue squares). From now on, it only replaces that memory if it finds something strictly lower.'] };
+      const ex = im.slice(0, 2).map(e => `${P(e.id)}: ${fmt(e.old)} → ${fmt(e.nw)}`).join('; ');
+      return { tag: `Iteration ${S.t} · personal best`, h: n ? `${n} of ${N} particles found a new personal best` : 'No particle improved this time', p: [n ? `Green rings mark the particles that found a spot lower than anything they had seen before. They update their memory (${ex}${n > 2 ? '; …' : ''}).` : 'Nobody beat their own record. This is normal late in a run, when the swarm is circling the minimum, or when steps are too big and overshoot.', `${N - n} particle${N - n === 1 ? '' : 's'} keep their old memory.`] };
+    }
+    case 'gbest': {
+      const o = ev.old, rtxt = ring ? ' With the ring neighbourhood, each particle actually follows the best of itself and its two neighbours (orange dotted links), so different groups can chase different valleys.' : '';
+      if (!o.g) return { tag: `Iteration ${S.t} · global best`, h: `The first leader is ${P(S.gi)}`, p: [`The lowest personal best in the swarm belongs to ${P(S.gi)} at ${pt(S.g)} with f = ${fmt(S.gf)}. The gold star marks it.${rtxt}`] };
+      return { tag: `Iteration ${S.t} · global best`, h: ev.changed ? `New swarm record: f = ${fmt(S.gf)}` : 'The record stands', p: [ev.changed ? `${P(S.gi)}'s personal best at ${pt(S.g)} beats the old record (${fmt(o.gf)}). The star jumps there and everyone will feel its pull.` : `No personal best beat f = ${fmt(S.gf)}, so the gold star stays at ${pt(S.g)}.`, rtxt].filter(Boolean) };
+    }
+    case 'velocity': {
+      const kk = fp.comps, mag = v => Math.hypot(v[0], v[1]), avg = S.ps.reduce((a, p) => a + mag(p.v), 0) / N;
+      const parts = [['keep going', mag(kk.inert)], ['return to own best', mag(kk.cog)], [`follow the ${ring ? 'neighbourhood' : 'swarm'} best`, mag(kk.soc)]].sort((a, b) => b[1] - a[1]);
+      const pp = [`Every particle mixes three urges into a new velocity: <span class="c-in">keep going</span> (w = ${fmt(ev.w)}), <span class="c-cog">go back to its own best</span> and <span class="c-soc">go toward the best it knows of</span>. Fresh random numbers r₁, r₂ scale the last two.`,
+        `For <b>${P(fp.id)}</b>, the strongest urge is "${parts[0][0]}" (length ${fmt(parts[0][1])}). The dashed pink arrow is the sum. Average speed in the swarm: ${fmt(avg)}.`];
+      if (S.cfg.worked && S.t === 1) pp.push('In iteration 1 the cognitive term is 0 because every personal best is the current position, and inertia is 0 because v starts at 0.');
+      if (fp.id === S.gi && !ring && mag(kk.soc) < 1e-12) pp.push(`${P(fp.id)} <i>is</i> the leader, so its social pull is zero.`);
+      if (ev.w > 1) pp.push('<b>Warning:</b> w > 1, so velocities grow every step.');
+      if (ev.clamped) pp.push(`${ev.clamped} particle${ev.clamped > 1 ? 's were' : ' was'} too fast and got capped at v<sub>max</sub>.`);
+      return { tag: `Iteration ${S.t} · velocity`, h: 'Each particle decides where to go', p: pp };
+    }
+    case 'move': {
+      const pp = [`Every particle takes its step: x ← x + v. ${ev.walls ? `${ev.walls} hit the edge of the search box (red rings) and ${S.cfg.bound === 'reflect' ? 'bounced back' : 'stopped there'}.` : 'Nobody left the search box.'}`, `Swarm spread went from ${fmt(ev.spreadBefore)} to ${fmt(ev.spreadAfter)}: the swarm is ${ev.spreadAfter < ev.spreadBefore ? 'contracting (exploiting)' : 'expanding (exploring)'}.`];
+      const pr = ui.prediction; if (pr && pr.t === S.t && pr.scored) pp.unshift(`<b>${pr.grade}</b> Your guess was ${pr.err.toFixed(1)}% of the map's diagonal from the real landing spot ${pt(S.ps[pr.id].x)}.`);
+      if (S.done) pp.push(`<b>Finished ${S.cfg.maxIter} iterations.</b> Best found: f = ${fmt(S.gf)} at ${pt(S.g)}, using ${S.evals} evaluations.`);
+      if (S.cfg.worked && S.t === 2) pp.push('That was the last iteration in the hand calculation. Press Step once more to see P2 take over as leader (f = 0.712).');
+      return { tag: `Iteration ${S.t} · move`, h: 'The swarm moves', p: pp };
+    }
+  }
+}
+function pushLog() { const e = explain(); ui.log.unshift(`${e.tag}: ${e.h}`); if (ui.log.length > 40) ui.log.pop(); }
+
+// --- panels
+function renderInfo() {
+  const e = explain(); $('explain').innerHTML = `<span class="tag">${e.tag}</span><h3>${e.h}</h3>${e.p.map(x => `<p>${x}</p>`).join('')}`;
+  $('log').innerHTML = ui.log.slice(1, 12).map(l => `<li>${l}</li>`).join('');
+  $('score').innerHTML = ui.stats.n ? `Challenge: ${ui.stats.n} guess${ui.stats.n > 1 ? 'es' : ''}, average error ${(ui.stats.sum / ui.stats.n).toFixed(1)}% of the diagonal.` : '';
+  const nxt = S.done ? '' : nextPhase(S);
+  for (const sp of $('phases').children) sp.className = sp.dataset.p === S.phase ? 'now' : sp.dataset.p === nxt ? 'next' : '';
+  for (const d of $('code').children) d.className = d.dataset.p === S.phase ? 'hl' : '';
+  // status
+  $('status').innerHTML = `<span>Iteration <b>${S.t}</b> / ${S.cfg.maxIter}</span><span>Next: <b>${S.done ? 'done' : nxt}</b></span><span>Evaluations <b>${S.evals}</b></span><span>Best f <b>${fmt(S.gf)}</b></span><span>w now <b>${fmt(currentW({ ...S, t: Math.max(1, S.t) }))}</b></span>`;
+  $('bBack').disabled = !ui.snaps.length; $('bSkip').style.display = ui.awaiting ? '' : 'none';
+  fig.classList.toggle('await', ui.awaiting);
+  $('banner').textContent = `Click where you think P${ui.focus + 1} will land`;
+  // inspector
+  const p = S.ps[ui.focus], k = p.comps, P = 'P' + (p.id + 1), ring = S.cfg.topo === 'ring', tg = ring ? 'lbest' : 'gbest';
+  $('inspTitle').textContent = P + (p.id === S.gi ? ' · current leader' : '');
+  let h = `<dl class="kv"><dt>position x</dt><dd>${pt(p.x)}</dd><dt>velocity v</dt><dd>${pt(p.v)}</dd><dt>fitness f(x)</dt><dd>${fmt(p.f)}</dd><dt>pbest</dt><dd>${Number.isFinite(p.pbf) ? pt(p.pb) + ' f=' + fmt(p.pbf) : 'none yet'}</dd><dt>${tg}</dt><dd>${ring ? (p.lb ? pt(p.lb) + ` (from P${p.lbi + 1})` : 'none yet') : (S.g ? pt(S.g) + ` (P${S.gi + 1})` : 'none yet')}</dd></dl>`;
+  if (k) {
+    const cur = k.t === S.t && (S.phase === 'velocity' || S.phase === 'move');
+    h += `<div class="hint" style="margin-bottom:4px">${cur ? `Velocity update, iteration ${k.t}` : `Last velocity update (iteration ${k.t})`}: r₁ = (${fmt(k.r1[0])}, ${fmt(k.r1[1])}), r₂ = (${fmt(k.r2[0])}, ${fmt(k.r2[1])})</div>`;
+    ['x', 'y'].forEach((n, d) => {
+      h += `<div class="eq"><span class="k">v<sub>${n}</sub> =</span> <span class="c-in">w·v</span> + <span class="c-cog">c₁·r₁·(pbest−x)</span> + <span class="c-soc">c₂·r₂·(${tg}−x)</span></div>`;
+      h += `<div class="eq">&nbsp;&nbsp;= <span class="c-in">${fmt(k.w)}·${fmt(k.vOld[d])}</span> + <span class="c-cog">${fmt(k.c1)}·${fmt(k.r1[d])}·(${fmt(k.pb[d])} − ${fmt(k.x[d])})</span> + <span class="c-soc">${fmt(k.c2)}·${fmt(k.r2[d])}·(${fmt(k.tgt[d])} − ${fmt(k.x[d])})</span></div>`;
+      h += `<div class="eq">&nbsp;&nbsp;= <span class="c-in">${fmt(k.inert[d])}</span> + <span class="c-cog">${fmt(k.cog[d])}</span> + <span class="c-soc">${fmt(k.soc[d])}</span> = <b class="c-res">${fmt(k.raw[d])}</b>${k.raw[d] !== p.v[d] && cur && S.phase === 'velocity' ? ` → capped ${fmt(p.v[d])}` : ''}</div>`;
+      if (cur) { const nx = S.phase === 'move' ? p.x[d] : k.x[d] + p.v[d], wall = S.phase === 'move' && p.hitWall;
+        h += `<div class="eq" style="margin-bottom:6px"><span class="k">${n}<sub>new</sub> =</span> ${fmt(k.x[d])} + ${fmt(S.phase === 'move' ? nx - k.x[d] : p.v[d])} = <b>${fmt(nx)}</b>${wall ? ' (wall)' : ''}</div>`; }
+    });
+  } else h += `<p class="hint">The velocity equation with this particle's real numbers appears at the <b>Velocity</b> phase.</p>`;
+  $('insp').innerHTML = h;
+  // table
+  const show = S.phase === 'pbest';
+  $('tbl').innerHTML = `<thead><tr><th>#</th><th>x</th><th>y</th><th>f</th><th>pbest f</th><th>|v|</th></tr></thead><tbody>` + S.ps.map(q => `<tr data-i="${q.id}" class="${show && q.improved ? 'imp' : ''} ${q.id === S.gi ? 'lead' : ''} ${q.id === ui.focus ? 'foc' : ''}"><td>P${q.id + 1}</td><td>${fmt(q.x[0])}</td><td>${fmt(q.x[1])}</td><td>${fmt(q.f)}</td><td>${fmt(q.pbf)}</td><td>${fmt(Math.hypot(q.v[0], q.v[1]))}</td></tr>`).join('') + '</tbody>';
+  drawCharts();
+}
+function drawChart(c, series, logScale) {
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1; c.width = r.width * d; c.height = r.height * d;
+  const g = c.getContext('2d'); g.scale(d, d); g.clearRect(0, 0, r.width, r.height);
+  const m = { l: 46, r: 8, t: 8, b: 18 }, W = r.width - m.l - m.r, H = r.height - m.t - m.b;
+  g.font = '10.5px "JetBrains Mono", monospace'; g.fillStyle = css('--muted');
+  const all = series.flatMap(s => s.v).filter(Number.isFinite);
+  if (!all.length) { g.textAlign = 'center'; g.fillText('appears after the first Global best phase', r.width / 2, r.height / 2); return; }
+  const T = v => logScale ? Math.log10(Math.max(v, 1e-300)) : v;
+  let lo = Math.min(...all.map(T)), hi = Math.max(...all.map(T)); if (hi - lo < 1e-12) { hi += 1; lo -= 1; }
+  const n = Math.max(2, series[0].v.length), X = i => m.l + i / (n - 1) * W, Y = v => m.t + (1 - (T(v) - lo) / (hi - lo)) * H;
+  g.strokeStyle = css('--line'); g.lineWidth = 1; g.beginPath(); g.moveTo(m.l, m.t); g.lineTo(m.l, m.t + H); g.lineTo(m.l + W, m.t + H); g.stroke();
+  g.textAlign = 'right'; g.textBaseline = 'middle';
+  const lab = v => logScale ? (v >= -3 && v <= 4 ? trimNum(10 ** v) : '1e' + Math.round(v)) : trimNum(v);
+  g.fillText(lab(hi), m.l - 5, m.t + 4); g.fillText(lab(lo), m.l - 5, m.t + H - 2);
+  g.textAlign = 'center'; g.textBaseline = 'top'; g.fillText('iteration ' + series[0].v.length, m.l + W / 2, m.t + H + 4);
+  for (const s of series) { g.strokeStyle = s.c; g.lineWidth = 2; g.beginPath(); s.v.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.stroke(); }
+  g.textAlign = 'left'; g.textBaseline = 'top'; let lx = m.l + 8;
+  for (const s of series) if (s.n) { g.fillStyle = s.c; g.fillRect(lx, m.t + 4, 10, 3); g.fillStyle = css('--muted'); g.fillText(s.n, lx + 14, m.t); lx += g.measureText(s.n).width + 30; }
+}
+function drawCharts() {
+  const best = S.hist.map(h => h.best), mean = S.hist.map(h => h.mean), lg = [...best, ...mean].every(v => v > 0);
+  $('chartNote').textContent = lg ? 'log scale' : 'linear scale';
+  drawChart($('ch1'), [{ v: mean, c: '#9aa4c0', n: 'mean f' }, { v: best, c: '#1240e0', n: 'best f' }], lg);
+  drawChart($('ch2'), [{ v: S.hist.map(h => h.spread), c: '#f26b0f' }], false);
+}
+function renderAll() { renderInfo(); ui.dirty = true; }
+
+// --- loop
+function frame(now) {
+  if (ui.playing) {
+    ui.acc += (now - ui.last) / 1000 * +$('speed').value; ui.last = now;
+    if (ui.acc >= 1) { ui.acc = 0; doStep(); }
+  }
+  if (ui.dirty || ui.anim || ui.awaiting) { draw(now); ui.dirty = false; }
+  requestAnimationFrame(frame);
+}
+
+// --- events
+$('bPlay').onclick = () => ui.playing ? pause() : play();
+$('bStep').onclick = () => { pause(); doStep(); };
+$('bIter').onclick = () => { pause(); stepIter(); };
+$('bBack').onclick = () => { pause(); back(); };
+$('bReset').onclick = reset;
+$('bSkip').onclick = () => { ui.awaiting = false; ui.predictedT = S.t; renderAll(); };
+$('speed').oninput = syncOutputs;
+['w', 'c1', 'c2', 'vmax'].forEach(id => $(id).oninput = () => { syncOutputs(); $('presetNote').textContent = 'Custom mix. Pick a preset to compare with a known behaviour.'; liveCfg(); });
+['wSched', 'bound', 'topo', 'maxIter'].forEach(id => $(id).onchange = liveCfg);
+['N', 'seed'].forEach(id => $(id).onchange = () => { syncOutputs(); reset(); });
+$('N').oninput = syncOutputs;
+$('problem').onchange = () => { syncOutputs(); reset(); };
+$('expr').onkeydown = e => { if (e.key === 'Enter') reset(); };
+$('presets').onclick = e => { const b = e.target.closest('button'); if (!b) return; const p = PRESETS[+b.dataset.i]; $('w').value = p.w; $('c1').value = p.c1; $('c2').value = p.c2; if (p.vmax !== undefined) $('vmax').value = p.vmax; else if (+$('vmax').value === 0) $('vmax').value = 0.2; $('presetNote').textContent = p.note; syncOutputs(); liveCfg(); };
+$('sContours').onchange = buildBackground;
+['sTrails', 'sArrows', 'sPb'].forEach(id => $(id).onchange = () => ui.dirty = true);
+$('challenge').onchange = () => { if (!$('challenge').checked && ui.awaiting) { ui.awaiting = false; ui.predictedT = S.t; } renderAll(); };
+$('tbl').onclick = e => { const tr = e.target.closest('tr[data-i]'); if (tr && !ui.awaiting) { ui.focus = +tr.dataset.i; renderAll(); } };
+const evPos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+cv.onclick = e => {
+  const [px, py] = evPos(e);
+  if (ui.awaiting) { if (px >= geo.m.l && py <= geo.m.t + geo.ph) submitPrediction(wx(px), wy(py)); return; }
+  let best = -1, bd = 18; S.ps.forEach((p, i) => { const d = Math.hypot(sx(p.x[0]) - px, sy(p.x[1]) - py); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) { ui.focus = best; renderAll(); }
+};
+cv.onmousemove = e => { const [px, py] = evPos(e); ui.hover = [px, py]; const inside = px >= geo.m.l && px <= geo.m.l + geo.pw && py >= geo.m.t && py <= geo.m.t + geo.ph; const ro = $('readout'); if (inside) { const x = wx(px), y = wy(py); ro.style.display = 'block'; ro.textContent = `x ${fmt(x)}  y ${fmt(y)}  f ${fmt(F(x, y))}`; } else ro.style.display = 'none'; if (ui.awaiting) ui.dirty = true; };
+cv.onmouseleave = () => { $('readout').style.display = 'none'; ui.hover = null; };
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input[type=text],input[type=number],select')) return;
+  if (e.key === ' ') { e.preventDefault(); ui.playing ? pause() : play(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); pause(); e.shiftKey ? stepIter() : doStep(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); pause(); back(); }
+  else if (e.key.toLowerCase() === 'r') reset();
+});
+function setMode(m) {
+  ui.mode = m; $('mExplore').classList.toggle('on', m === 'explore'); $('mWorked').classList.toggle('on', m === 'worked');
+  document.body.classList.toggle('worked', m === 'worked'); $('controls').classList.toggle('locked', m === 'worked');
+  if (m === 'worked') { $('w').value = WORKED.w; $('c1').value = WORKED.c1; $('c2').value = WORKED.c2; $('N').value = 3; $('vmax').value = 0; $('topo').value = 'global'; $('wSched').value = 'const'; }
+  else { $('w').value = 0.729; $('c1').value = 1.494; $('c2').value = 1.494; $('N').value = 20; $('vmax').value = 0.2; }
+  ui.focus = 0; syncOutputs();
+  $('problem').style.display = m === 'worked' ? 'none' : ''; if (m === 'worked') { $('pblurb').textContent = PROBLEMS.worked.name + '. ' + PROBLEMS.worked.blurb; $('customBox').style.display = 'none'; }
+  reset();
+}
+$('mExplore').onclick = () => setMode('explore');
+$('mWorked').onclick = () => setMode('worked');
+$('runTest').onclick = () => {
+  const rows = selfTest(), pass = rows.filter(r => r.ok).length, show = v => Array.isArray(v) ? pt(v) : typeof v === 'number' ? fmt(v) : v;
+  $('testOut').innerHTML = `<p class="${pass === rows.length ? 'pass' : 'fail'}">${pass} / ${rows.length} checks match the hand calculation ${pass === rows.length ? '✓' : '✗'}</p><div class="scroll"><table><thead><tr><th>Quantity</th><th>Hand</th><th>Engine</th><th></th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.label}</td><td>${show(r.hand)}</td><td>${show(r.got)}</td><td class="${r.ok ? 'pass' : 'fail'}">${r.ok ? '✓' : '✗'}</td></tr>`).join('')}</tbody></table></div>`;
+};
+const ro = new ResizeObserver(() => { if (S) { buildBackground(); drawCharts(); } });
+ro.observe(fig);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { clearCss(); buildBackground(); renderAll(); });
+new MutationObserver(() => { clearCss(); buildBackground(); renderAll(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+syncOutputs(); reset();
+requestAnimationFrame(t => { ui.last = t; frame(t); });
+window.__swarm = { get S() { return S; }, ui, doStep, selfTest, setMode };
+}
+}
+</script>
+</body>
+</html>
